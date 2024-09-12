@@ -1,0 +1,472 @@
+---
+title: "Prova 1 - Aprendizagem de Máquina"
+author: "Joana D'arc Nunes da Silva, Matrícula: 20180078535"
+date: last-modified
+date-format: "DD MMM, YYYY"
+format:
+  html:
+    theme: lux
+    code-fold: show
+    code-tools: false
+    code-block-bg: true
+    code-block-border-left: "#9400D3"
+    highlight-style: github
+    code-link: true
+    toc: true
+    toc-title: Sumário
+    toc-location: left
+    toc-depth: 2
+    number-sections: false
+    number-depth: 3
+    smooth-scroll: true
+    link-external-newwindow: true
+fig-dpi: 1000
+self-contained: true
+page-layout: full
+editor: source
+---
+
+# Questão 1:
+
+Disserte sobre o processo de treinamento de modelo de regressão em aprendizagem de máquina. Explique cada um dos passos considerando a imagem que segue:\
+![](C:/Users/luiza/OneDrive/Documentos/JOANA/ESTATÍSTICA/2024.1/Aprendizagem de Máquina/AM/Prova1/dados/imagem_questao1_AM_p1.png){width="70%"}\
+Não esqueça de explicar:\
+1. O que é a validação cruzada e qual a diferença entre o *leave-one-out* e o *k-fold cross-validation*;\
+2. O que é o risco preditivo do modelo e qual seu estimador;\
+3. A importância de se ter uma base de dados de teste para avaliação final do modelo.\
+
+`Resposta:` No processo de treinamento de um modelo de regressão em aprendizagem de máquina, primeimeiramente fazemos o *data spliting* dos dados, ou seja, a divisão dos dados que usualmente é dividida em treino, validação e teste, onde no conjunto de treino realizamos o ajuste do modelo que melhor se adaptou aos dados, no conjunto de validação fazemos a tunagem de hiperparâmetros do modelo, e no conjunto de teste é onde avaliamos o desempenho do modelo final escolhido por meio do risco preditivo. A validação cruzada consiste na divisão dos dados em treino e validação, em que no *leave-one-out cross validation* a cada iteração tiramos de fora uma única observação para teste e treinamos o modelo com as observações que ficaram, assim consequentemente, iremos ter $n$ modelos ajustados, em que $n$ é o número de observações total na base de dados. Já no *k-fold cross validation* iremos ter $k$ modelos finais ajustados, em que $k$ é o número de lotes, onde a cada iteração um determinado lote será utilizado para teste e o restante das observações serão usadas para treinar o modelo. O risco preditivo avalia o desempenho do modelo ajustado, no qual o Erro Quadrático Médio (EQM) geralmente é utilizado como medida para avaliar este desempenho, onde o EQM é a média do quadrado dos erros entre os valores observados e os valores preditos pelo modelo. É importante termos uma base de dados somente de teste para avaliação do modelo final, pois é nela que verificamos a capacidade de generalização do modelo.\
+
+# Questão 2:
+
+Considere o modelo de regressão real definido pela equação abaixo:\
+$$r(x) = 2.76 + 0.5x_1 - 0.75x_2 + 0.5x_3 - 0.75x_4 + x_5 + \sum_{i=6}^{30} 0x_i + \epsilon,$$\
+em que $\epsilon \sim N(0,0.5^2)$ e $x_i \sim N(0,1)$, $\forall{i} = 1, ..., 30$. Treine um modelo de regressão linear múltipla e estime o risco preditivo do modelo.\
+
+**Dicas:**\
+1. Considere uma base de dados com $n=1000$ observações e $31$ colunas;\
+2. Note que $X$ será uma matriz de *features* (recursos/covariáveis) com $31$ colunas, sendo a primeira coluna composta por $1’s$ (por conta do intercepto) e as demais colunas compostas por valores aleatórios de uma distribuição normal padrão, conforme mencionado anteriormente, i.e., $x_i \sim N(0,1), \forall{i}$;\
+3. Note que não há hiperparâmetros a serem ajustados, diferentemente da regressão polinomial que vimos em sala de aula;\
+4. Não havendo hiperparâmetros, você precisa apenas dividir a base de dados entre treino e teste, isto é, realizar o *hold-out*;\
+5. Ajuste o modelo na base de dados considerando o conjunto de treino;\
+6. Avalie o modelo na base de teste.\
+
+`Resposta:`
+
+```{r, warning=FALSE}
+rm(list=ls())
+library(tidymodels)
+
+tidymodels_prefer()
+
+n = 1000
+
+# Modelo real que não conhecemos
+random_real <- function(n){
+  x <- rnorm(n, 0, 1)
+    runif(n, 8, 18)
+  y <- 2.76 + 0.5*x1 - 0.75*x2 + 0.5*x3 - 0.75*x4  + x5 + sum(xi) + rnorm(n, 0, 0.5)
+  tibble(x = x, y = y)
+}
+```
+
+# Questão 3:
+
+Considere o modelo de regressão real dado por: $$r(x) = 1.6 + 5\sin(x) - 8x^2 + \epsilon,$$\
+em que $x \sim U(0,20)$ e $\epsilon \sim N(0,1)$ (normal padrão). Treine modelos de regressão polinomial com o grau do polinômio $p=1,2,3$ e estime o risco preditivo de cada um dos modelos.\
+
+**Dicas:**\
+1. Considere $n = 10000$ observações;\
+2. Não é necessário fazer fazer *cross-validation*;\
+3. Apenas considere treino e teste;\
+4. Ajuste cada um dos modelos no treino e estime o risco preditivo do modelo de cada um dos modelos no conjunto de teste.\
+
+Interprete o resultado obtido.
+
+![](C:/Users/luiza/OneDrive/Documentos/JOANA/ESTATÍSTICA/2024.1/Aprendizagem de Máquina/AM/Prova1/dados/imagem_questao3_AM_p1.png){width="70%"}\
+
+`Resposta:`
+
+```{r, warning=FALSE, message=FALSE}
+rm(list=ls())
+# Carregando as bibliotecas
+library(tidymodels)
+library(ggplot2)
+library(tibble)
+library(rsample)
+library(patchwork)
+library(tidyverse)
+
+tidymodels_prefer()
+
+# Modelo real que não conhecemos
+random_real <- function(n){
+  x <- runif(n = n, min = 0, max = 20)
+  # Essa é a regressão real
+  y <- 1.6 + 5*sin(x) - 8*(x^2) + rnorm(n, mean = 0, sd = 1)
+
+  tibble(x = x, y = y)
+}
+
+# Funções para treinar
+treinar <- function(p, dados_treino){
+  # Criando uma regressao polinomial
+  lm(data = dados_treino, y ~ poly(x, degree = p, raw = TRUE))
+}
+
+# Função para testar
+teste <- function(modelo, dados_teste){
+  # Calculando o erro quadrático médio
+  dados_teste %>%
+    mutate(
+      y_hat = predict(modelo, newdata = dados_teste) # Aqui calculo y chapeu
+    ) %>%
+    summarise(
+      eqm = mean((y - y_hat)^2)
+    )
+}
+
+# Função para avaliar o modelo
+avaliacao_eqm <- function(p, dados_treino, dados_teste){
+
+  # Treinando o modelo
+  ajuste <- treinar(p, dados_treino)
+
+  # Calculando o erro quadrático médio
+  eqm <- teste(ajuste, dados_teste)
+
+  list(ajuste = ajuste, eqm = as.numeric(eqm[1,1]))
+}
+```
+
+```{r, warning=FALSE}
+# Fixando semente
+set.seed(0)
+
+# Gerando a base total de dados com 10000 observações
+dados <- random_real(n = 10000)
+
+#  Realizando o Hold-out
+dados_divididos <- rsample::initial_split(dados, prop = 0.8, strata = y)
+dados_treino <- rsample::training(dados_divididos)
+dados_teste <- rsample::testing(dados_divididos)
+grau_maximo <- 3
+
+# Avaliando o erro quadrático médio para cada grau
+vec_eqm <-
+  purrr::map_dbl(
+    .x = 1L:grau_maximo,
+    .f = \(p) avaliacao_eqm(p = p, dados_treino = dados_treino, dados_teste = dados_teste)$eqm
+  )
+```
+
+```{r, warning=FALSE}
+# Tabela com os EQM's e seus respectivos graus de polinômio
+dados_eqm <- tibble(p = 1L:grau_maximo, eqm = vec_eqm)
+dados_eqm
+```
+
+```{r, warning=FALSE}
+# Melhor grau do polinômio que tem o menor EQM
+melhor_p <- which.min(vec_eqm)
+melhor_p
+```
+
+```{r, warning=FALSE}
+# Ajustando a regressão verdadeira com grau 1 sobre os dados
+ajuste1 <- treinar(p = 1, dados_treino = dados_teste)
+ajuste1
+```
+
+```{r, warning=FALSE}
+# Ajustando a regressão verdadeira com grau 2 sobre os dados
+ajuste2 <- treinar(p = 2, dados_treino = dados_teste)
+ajuste2
+```
+
+```{r, warning=FALSE}
+# Ajustando a regressão verdadeira com grau 3 sobre os dados
+ajuste3 <- treinar(p = 3, dados_treino = dados_teste)
+ajuste3
+```
+
+Observa-se que o melhor o modelo de regressão polinomial é o de grau 3, pois apresentou menor erro quadrático médio.\
+
+
+# Questão 4:
+
+Considere a base de dados referente à vendas de sorvetes. A base de dados contém as seguintes variáveis:\
+1. `Temperatura:` temperatura média do dia;\
+2. `Vendas:` quantidade de sorvetes vendidos no dia.\
+
+**Download:** Para baixar os dados, acesse o [link](https://www.kaggle.com/datasets/mirajdeepbhandari/polynomial-regression?select=Ice_cream+selling+data.csv) e clique em "Download", no canto superior direito.\
+
+Estamos interessados em estimar as vendas de sorvetes dado a temperatura. Dessa forma, considere o número de vendas como sendo o *label* (variável $y$) e as temperaturas como sendo as *features* (variáveis $x$).\
+
+Considerando a base de dados fornecida, treine um modelo de regressão polinomial com grau $p = 1,2,3,4,5$ e estime o risco preditivo do modelo selecionado. Além disso, construa um gráfico do modelo selecionado ajustado aos dados.\
+
+**Dicas:**\
+1. Considere utilizar um esquema de validação cruzada para selecionar o melhor hiperparâmetro;\
+2. Com o grau de polinômio escolhido, treine o modelo na base de dados de treino e avalie o risco desse modelo no conjunto de teste;\
+3. Considere uma divisão inicial *(hold-out)* na proporção $80\%$ (treino) e $20\%$ para teste.\
+
+`Resposta:`
+
+```{r, warning=FALSE}
+rm(list=ls())
+# Carregando os pacotes
+library(tidymodels)
+library(ggplot2)
+library(tibble)
+library(rsample)
+library(patchwork)
+library(tidyverse)
+library(corrr)
+
+tidymodels::tidymodels_prefer()
+
+# Carregando a base de dados
+dados <- read.csv("~/JOANA/ESTATÍSTICA/2024.1/Aprendizagem de Máquina/AM/Prova1/dados/Ice_cream.csv", sep = ",",
+                  col.names = c("temperatura","vendas"))
+
+# Renomeando as variáveis
+dados <- dados %>% dplyr::rename(x = temperatura, y = vendas)
+
+# Fixando a semente
+set.seed(0)
+
+# Realizadon hold-out
+dados_split <- rsample::initial_split(dados, prop = 0.8, strata = "y")
+treino <- rsample::training(dados_split)
+teste <- rsample::testing(dados_split)
+
+# Fazendo validação cruzada
+cv <- vfold_cv(treino, v = 5)
+
+# Definindo o modelo
+modelo <-
+  parsnip::linear_reg() %>%
+  parsnip::set_engine("lm") %>%
+  parsnip::set_mode("regression")
+
+
+# Definindo receita
+receita <-
+  recipe(y ~ ., data = treino) %>%
+  recipes::step_poly(
+      all_numeric_predictors(),
+      degree = tune("p"),
+      options = list(raw = TRUE)
+    )
+
+# Validacação cruzada
+cv <- vfold_cv(treino, v = 5)
+
+# Criando o workflow
+wf <-
+  workflow() %>%
+  add_recipe(receita) %>%
+  add_model(modelo)
+
+# Extraindo hiperparametros do modelo
+parametros <-
+  wf %>%
+  extract_parameter_set_dials() %>% # Extraindo os hiperparâmetros do modelo
+  extract_parameter_dials("p") %>%
+  range_set(range = c(1, 5)) %>%
+  parameters()
+
+parametros$id <- "p"
+
+# Tunando o modelo
+tunagem <- tune_grid(
+  wf,
+  resamples = cv,
+  grid = tibble(p = 1:5), # Parâmetros que desejamos que ele teste
+  metrics = metric_set(rmse)
+)
+
+# Coletando as métricas e o melhor grau
+collect_metrics(tunagem)
+```
+
+
+```{r, warning=FALSE}
+# Visualizando o melhor grau segundo a métrica RMSE
+show_best(tunagem, n = 1, metric = "rmse")
+```
+
+
+```{r, warning=FALSE}
+# Selecionado o melhor "p"
+melhor_p <- select_best(tunagem, metric = "rmse")
+melhor_p
+```
+O melhor grau de polinômio é 2, segundo a métrica RMSE.\
+
+
+```{r, warning=FALSE}
+# Finalizando
+wf <-
+  wf %>%
+  finalize_workflow(melhor_p)
+
+# Realizando o ajuste final do modelo
+ajuste <- last_fit(wf, dados_split, metrics = metric_set(rmse))
+
+# Olhando o desempenho no teste
+collect_metrics(ajuste)
+```
+
+
+```{r, warning=FALSE, message= FALSE}
+real_vs_estimado <- collect_predictions(ajuste)
+
+real_vs_estimado %>%
+  ggplot(aes(x = .pred, y = y)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "tomato") +
+  labs(
+    title = "Real vs Estimado",
+    subtitle = "Base de teste",
+    x = "Previsões",
+    y = "Observações"
+  )
+```
+
+
+```{r, warning=FALSE}
+# Prevendo
+dados_qualquer <- sample_n(dados, 10) # Seleciona 10 linhas quaisquer de dados.
+wf_modelo <- extract_workflow(ajuste)
+valores_previstos <- predict(wf_modelo, new_data = dados_qualquer)
+
+# Visualizando lado a lado, y e valores previstos
+dplyr::bind_cols(dados_qualquer, valores_previstos)
+```
+
+
+```{r, warning=FALSE}
+# Prevendo o número de vendas de sorvetes em uma temperatura de 3 graus celsius
+predict(wf_modelo, new_data = tibble(x = 3))
+
+```
+
+Estima-se que o número de vendas de sorvetes em uma temperatura de 3 graus celsius é de aproximadamente 16 unidades.\
+
+
+# Questão 5:
+
+Considere o modelo de regressão real dado por: $$r(x) = 45 \times tanh\left(\frac{x}{1.9} - 7\right) + 57 + \epsilon,$$\
+em que $x$ são observações de uma variável aleatória $X \sim U(0,18)$ e $\epsilon \sim N(0,4)$. Considerando um conjunto de dados de 10 mil observações, treine um modelo de regressão polinomial com grau $p=1, ..., 15$. Estime o risco preditivo do melhor modelo. Construa um gráfico do melhor modelo ajustando aos dados de teste, i.e., $y$ versus $\hat{y}$ do conjunto de teste.\
+
+`Resposta:`
+
+```{r, warning=FALSE}
+rm(list=ls())
+# Carregando as bibliotecas
+library(tidymodels)
+library(ggplot2)
+library(tibble)
+library(rsample)
+library(patchwork)
+
+# Modelo real que não conhecemos
+random_real <- function(n){
+  x <- runif(n = n, min = 0, max = 18)
+  # Regressão real
+  y <- 45 * tanh(x/1.9 - 7) + 57  + rnorm(n, 0, 2)
+
+  tibble(x = x, y = y)
+}
+
+# Função para treinar o modelo
+treinar <- function(p, dados_treino){
+  # Criando uma regressao polinomial
+  lm(data = dados_treino, y ~ poly(x, degree = p, raw = TRUE))
+}
+
+# Função para testar o modelo
+teste <- function(modelo, dados_teste){
+  # Calculando o erro quadrático médio
+  dados_teste %>%
+    mutate(
+      y_hat = predict(modelo, newdata = dados_teste) # Aqui calculo y chapeu
+    ) %>%
+    summarise(
+      eqm = mean((y - y_hat)^2)
+    )
+}
+
+# Função para avaliar o erro quadrático médio
+avaliacao_eqm <- function(p, dados_treino, dados_teste){
+
+  # Treinando o modelo
+  ajuste <- treinar(p, dados_treino)
+
+  # Calculando o erro quadrático médio
+  eqm <- teste(ajuste, dados_teste)
+
+  list(ajuste = ajuste, eqm = as.numeric(eqm[1,1]))
+}
+```
+
+```{r, warning=FALSE}
+# Fixando semente
+set.seed(0)
+
+# Gerando a base total de dados com 10000 observações
+dados <- random_real(n = 10000)
+
+# Realizando o Hold-out
+dados_divididos <- rsample::initial_split(dados, prop = 0.8, strata = y)
+dados_treino <- rsample::training(dados_divididos)
+dados_teste <- rsample::testing(dados_divididos)
+grau_maximo <- 15
+
+# Avaliando o erro quadrático médio para cada grau de polinômio
+valores <-
+  purrr::map_dbl(
+    .x = 1L:grau_maximo,
+    .f = \(p) avaliacao_eqm(p = p, dados_treino = dados_treino, dados_teste = dados_teste)$eqm
+  )
+
+# Melhor grau de polinômio
+melhor_p <- which.min(valores)
+melhor_p
+```
+
+```{r, warning=FALSE}
+# Ajustando a regressão verdadeira com melhor_p sobre os dados
+ajuste <- treinar(p = melhor_p, dados_treino = dados_teste)
+
+# Visualizando os dados e a regressão real
+p <- ggplot(data = dados_teste, aes(x = x, y = y)) +
+  geom_point() +
+  theme_minimal() +
+  ggtitle("Dados reais") +
+  stat_function(fun = function(x) 45 * tanh(x/1.9 - 7) + 57, col = "red", linewidth = 1.2)
+
+# Visualizando o ajuste
+p_ajuste <-
+  p +
+  geom_function(fun = function(x) predict(ajuste, newdata = tibble(x = x)), col = "blue", linewidth = 1.2) +
+  ggtitle("Ajuste") +
+  labs(x = "x", y = "y")
+
+# Visualizando os EQM's
+p_eqm <-
+  tibble(p = 1L:grau_maximo, eqm = valores) %>%
+  ggplot(aes(x = p, y = eqm)) +
+  geom_line(linetype = "dotted", linewidth = 1) +
+  annotate("point", x = melhor_p, y = valores[melhor_p], col = "red", size = 4, alpha = 0.7) +
+  theme_minimal() +
+  ggtitle("EQM") +
+  labs(x = "p", y = "EQM") +
+  scale_y_log10()
+
+p + p_ajuste + p_eqm
+
+```
+
+Nota-se que o melhor modelo de regressão polinomial é o de grau 14. O gráfico acima mostra a regressão real (em vermelho) e o ajuste do modelo de regressão polinomial de grau 14 (em azul) sobre os dados de teste. Além disso, o gráfico de EQM mostra que o modelo de grau 14 é o que apresenta menor Erro Quadrático Médio.\

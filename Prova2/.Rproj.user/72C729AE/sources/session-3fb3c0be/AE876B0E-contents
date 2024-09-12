@@ -1,0 +1,1186 @@
+---
+title: "Prova 2 - Aprendizagem de Máquina"
+author: "Joana D'arc Nunes da Silva, Matrícula: 20180078535"
+date: last-modified
+date-format: "DD MMM, YYYY"
+format:
+  html:
+    theme: lux
+    code-fold: show
+    code-tools: false
+    code-block-bg: true
+    code-block-border-left: "#9400D3"
+    highlight-style: github
+    code-link: true
+    toc: true
+    toc-title: Sumário
+    toc-location: left
+    toc-depth: 2
+    number-sections: false
+    number-depth: 3
+    smooth-scroll: true
+    link-external-newwindow: true
+fig-dpi: 1000
+self-contained: true
+page-layout: full
+editor: source
+---
+
+# Questão 1:
+
+Crie um problema de regressão simulado em que a variável *target* (variável resposta) depende de 5 variáveis preditoras, porém, a base de dados, com 5 mil observações possui outras 15 *features* que não são relevantes para a predição. A variável *target* deve ser gerada a partir de uma função linear das variáveis preditoras, em que você poderá definir os pesos dessas 5 primeiras e as outras 15 restantes deverão ter peso zero. Ajuste a regressão Lasso e Ridge usando *10-fold cross-validation* e avalie o risco preditivo dos modelos. Quais os valores estimados dos coeficientes e qual modelo você escolheria para fazer previsões? Qual dos modelos gerou um vetor esparso dos coeficientes estimados? \
+
+`Resposta:` 
+
+```{r}
+rm(list = ls())
+
+# Carregando pacotes 
+library(tidyverse)
+library(tidymodels)
+library(tibble)
+library(purrr)
+library(ggplot2)
+library(patchwork)
+library(workflowsets)
+library(yardstick)
+library(glmnet)
+
+# Dando preferencias as funcoes do tidymodels 
+tidymodels::tidymodels_prefer()
+
+# Setando a semente 
+set.seed(0)
+
+# Função para gerar os dados 
+gerando_dados <- function(n = 5000L){
+  regressao <- function(i){
+    x <- rnorm(n = 5000L, 0, 1)
+    target <- 7*x[1L] - 5*x[2L] + 2*x[3L] + 4*x[4L] + 9*x[5L] + rnorm(1L, 0, 0.5)
+    tibble(
+      y = target,
+      x1 = x[1L],
+      x2 = x[2L],
+      x3 = x[3L],
+      x4 = x[4L],
+      x5 = x[5L]
+    )
+  }
+  dados <- purrr::map(.x = 1L:n, .f = regressao) %>% 
+    purrr::list_rbind()
+  
+  parte_esparsa <- matrix(0, n, 15)
+  
+  dados <- cbind(dados, parte_esparsa)
+  colnames(dados) <- c("y", paste0("x", 1L:20L))
+  tibble::as_tibble(dados)
+}
+
+dados <- gerando_dados()
+
+# Realizando o hold-out 
+dados_split <- rsample::initial_split(dados, prop = 0.8, strata = "y")
+treino <- rsample::training(dados_split)
+teste <- rsample::testing(dados_split)
+
+# Setando o modelo (set engine) 
+modelo_ridge <- 
+  parsnip::linear_reg(penalty = tune::tune(), mixture = 0) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("glmnet")
+
+modelo_lasso <- 
+  parsnip::linear_reg(penalty = tune::tune(), mixture = 1) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("glmnet")
+
+# Criando workflows 
+all_wf <- 
+  workflowsets::workflow_set(
+    preproc = list(y ~ .),
+    models = list(ridge = modelo_ridge, lasso = modelo_lasso), 
+    cross = TRUE
+  )
+
+# Validação cruzada 
+set.seed(0)
+cv <- rsample::vfold_cv(treino, v = 10L)
+
+# Setando a métrica 
+metrica <- yardstick::metric_set(rmse)
+
+# Tunagem dos hiperparâmetros 
+tunagem <- 
+  all_wf %>% 
+  workflowsets::workflow_map(
+    seed = 0, 
+    verbose = TRUE,
+    resamples = cv,
+    grid = 50,
+    metrics = metrica
+  )
+```
+
+
+```{r}
+# Rank dos melhores modelos 
+modelos_rank <- tunagem %>% workflowsets::rank_results() %>% print()
+```
+
+
+```{r}
+# Selecionando os melhores modelos 
+melhor_ridge <- 
+  tunagem %>% 
+  workflowsets::extract_workflow_set_result("formula_ridge") %>% 
+  tune::select_best(metric = "rmse") 
+
+melhor_lasso <- 
+  tunagem %>% 
+  workflowsets::extract_workflow_set_result("formula_lasso") %>% 
+  tune::select_best(metric ="rmse")
+
+# Finalizando os modelos 
+finalizando_ridge <- 
+  tunagem %>% 
+  workflowsets::extract_workflow("formula_ridge") %>% 
+  tune::finalize_workflow(melhor_ridge) %>% 
+  tune::last_fit(split = dados_split)
+
+finalizando_lasso <- 
+  tunagem %>% 
+  workflowsets::extract_workflow("formula_lasso") %>% 
+  tune::finalize_workflow(melhor_lasso) %>% 
+  tune::last_fit(split = dados_split)
+
+# Visualizando as métricas do modelo Ridge
+finalizando_ridge %>% workflowsets::collect_metrics()
+```
+
+
+```{r}
+# Visualizando as métricas do modelo Lasso
+finalizando_lasso %>% workflowsets::collect_metrics()
+```
+
+
+Avaliando o risco preditivo dos modelos, nota-se que o modelo Lasso apresentou um Erro Quadrático Médio (EQM) de $0.503$, enquanto o modelo Ridge apresentou um EQM de $0.965$. Além disso, observa-se que ambos os modelos apresentaram um $R^{2}$ de $0.999$. Como o risco preditivo do modelo Lasso foi menor que o do modelo Ridge, então eu escolheria o modelo Lasso para fazer as previsões.\
+
+
+```{r}
+# Visualizando predições do modelo Ridge
+finalizando_ridge %>% workflowsets::collect_predictions()
+```
+
+
+```{r}
+# Visualizando predições do modelo Lasso
+finalizando_lasso %>% workflowsets::collect_predictions()
+```
+
+
+```{r}
+# Extraindo o modelo Ridge
+modelo_final_ridge <- 
+  finalizando_ridge %>% 
+  extract_fit_parsnip() 
+
+# Extraindo o modelo Lasso
+modelo_final_lasso <- 
+  finalizando_lasso %>% 
+  extract_fit_parsnip()
+```
+
+
+```{r}
+# Visualizando os coeficientes estimados do modelo Ridge
+coeficientes_ridge <- modelo_final_ridge %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)") %>% print()
+```
+
+
+```{r}
+# Visualizando os coeficientes estimados do modelo Lasso
+coeficientes_lasso <- modelo_final_lasso %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)") %>% print()
+```
+
+
+O modelo Lasso gerou um vetor esparso de coeficientes estimados, pois assim como na penalização AIC é realizada a seleção de variáveis, consequentemente, alguns coeficientes são zerados, o mesmo não acontece com o modelo Ridge.\
+
+
+```{r}
+# Fazendo previsões 
+dados_novos <- dados[sample(1:nrow(dados), 10), -1]
+
+# Fazendo previsões com o modelo Ridge
+predict(finalizando_ridge$.workflow[[1]], 
+                           new_data = dados_novos)
+```
+
+
+```{r}
+# Fazendo previsões com o modelo Lasso
+predict(finalizando_lasso$.workflow[[1]], 
+                           new_data = dados_novos)
+```
+
+
+```{r}
+# Adicionando as previsões com o modelo Ridge ao conjunto de dados original
+augment(finalizando_ridge$.workflow[[1]], 
+                         new_data = dados_novos)
+```
+
+
+```{r}
+# Adicionando as previsões com o modelo Lasso ao conjunto de dados original
+augment(finalizando_lasso$.workflow[[1]], 
+                         new_data = dados_novos)
+```
+
+
+# Questão 2:
+
+Considere o melhor modelo da questão anterior, e compare-o com a regressão *Elastic Net*. Faça uma comparação justa dos modelos, utilizando `workflow_set` e `workflow_map`. Avalie o risco preditivo dos modelos e compare os coeficientes estimados. Qual dos modelos você escolheria para fazer previsões? Explique! \
+
+`Resposta:`
+
+Como o melhor modelo na questão anterior foi o modelo Lasso, então irei compará-lo com o modelo Elastic Net.\
+
+```{r}
+rm(list = ls())
+
+# Carregando pacotes 
+library(tidyverse)
+library(tidymodels)
+library(tibble)
+library(purrr)
+library(ggplot2)
+library(patchwork)
+library(workflowsets)
+library(yardstick)
+library(glmnet)
+
+# Dando preferencias as funcoes do tidymodels 
+tidymodels::tidymodels_prefer()
+
+# Setando a semente 
+set.seed(0)
+
+# Função para gerar os dados 
+gerando_dados <- function(n = 5000L){
+  regressao <- function(i){
+    x <- rnorm(n = 5000L, 0, 1)
+    target <- 7*x[1L] - 5*x[2L] + 2*x[3L] + 4*x[4L] + 9*x[5L] + rnorm(1L, 0, 0.5)
+    tibble(
+      y = target,
+      x1 = x[1L],
+      x2 = x[2L],
+      x3 = x[3L],
+      x4 = x[4L],
+      x5 = x[5L]
+    )
+  }
+  dados <- purrr::map(.x = 1L:n, .f = regressao) %>% 
+    purrr::list_rbind()
+  
+  parte_esparsa <- matrix(0, n, 15)
+  
+  dados <- cbind(dados, parte_esparsa)
+  colnames(dados) <- c("y", paste0("x", 1L:20L))
+  tibble::as_tibble(dados)
+}
+
+dados <- gerando_dados()
+
+# Realizando o hold-out 
+dados_split <- rsample::initial_split(dados, prop = 0.8, strata = "y")
+treino <- rsample::training(dados_split)
+teste <- rsample::testing(dados_split)
+
+# Setando o modelo (set engine) 
+modelo_lasso <- 
+  parsnip::linear_reg(penalty = tune::tune(), mixture = 1) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("glmnet")
+
+modelo_elastic <- 
+  parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("glmnet")
+
+# Criando workflows 
+all_wf <- 
+  workflowsets::workflow_set(
+    preproc = list(y ~ .),
+    models = list(lasso = modelo_lasso, elastic = modelo_elastic), 
+    cross = TRUE
+  )
+
+# Validação cruzada 
+set.seed(0)
+cv <- rsample::vfold_cv(treino, v = 10L)
+
+# Setando a métrica 
+metrica <- yardstick::metric_set(rmse)
+
+# Tunagem dos hiperparâmetros 
+tunagem <- 
+  all_wf %>% 
+  workflowsets::workflow_map(
+    seed = 0, 
+    verbose = TRUE,
+    resamples = cv,
+    grid = 50,
+    metrics = metrica
+  )
+```
+
+
+```{r}
+# Rank dos melhores modelos 
+modelos_rank <- tunagem %>% workflowsets::rank_results() %>% print()
+```
+
+
+```{r}
+# Selecionando os melhores modelos 
+melhor_lasso <- 
+  tunagem %>% 
+  workflowsets::extract_workflow_set_result("formula_lasso") %>% 
+  tune::select_best(metric ="rmse")
+
+melhor_elastic <- 
+  tunagem %>% 
+  workflowsets::extract_workflow_set_result("formula_elastic") %>% 
+  tune::select_best(metric = "rmse")
+
+# Finalizando os modelos 
+finalizando_lasso <- 
+  tunagem %>% 
+  workflowsets::extract_workflow("formula_lasso") %>% 
+  tune::finalize_workflow(melhor_lasso) %>% 
+  tune::last_fit(split = dados_split)
+
+finalizando_elastic <- 
+  tunagem %>% 
+  workflowsets::extract_workflow("formula_elastic") %>% 
+  tune::finalize_workflow(melhor_elastic) %>% 
+  tune::last_fit(split = dados_split)
+
+## Visualizando as métricas do modelo Lasso
+finalizando_lasso %>% workflowsets::collect_metrics()
+```
+
+
+```{r}
+# Visualizando as métricas do modelo Elastic Net
+finalizando_elastic %>% workflowsets::collect_metrics()
+```
+
+
+Avaliando o risco preditivo dos modelos, nota-se que o modelo Lasso apresentou um Erro Quadrático Médio (EQM) de $0.503$, enquanto o modelo Elastic Net apresentou um EQM de $0.502$. Além disso, observa-se que ambos os modelos apresentaram um $R^{2}$ de $0.999$. Como o risco preditivo do modelo Elastic Net foi um pouco menor que o do modelo Lasso, então eu escolheria o modelo Elastic Net para fazer as previsões.\
+
+
+```{r}
+# Visualizando predições do modelo Lasso
+finalizando_lasso %>% workflowsets::collect_predictions()
+```
+
+```{r}
+# Visualizando predições do modelo Elastic Net
+finalizando_elastic %>% workflowsets::collect_predictions()
+```
+
+```{r}
+# Extraindo o modelo Lasso
+modelo_final_lasso <- 
+  finalizando_lasso %>% 
+  extract_fit_parsnip() 
+
+# Extraindo o modelo Elastic Net
+modelo_final_elastic <- 
+  finalizando_elastic %>% 
+  extract_fit_parsnip()
+```
+
+
+```{r}
+# Visualizando os coeficientes estimados do modelo Lasso
+coeficientes_lasso <- modelo_final_lasso %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)") %>% print()
+```
+
+
+```{r}
+# Visualizando os coeficientes estimados do modelo Elastic Net
+coeficientes_elastic <- modelo_final_elastic %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)") %>% print()
+```
+
+```{r}
+# Fazendo previsões 
+dados_novos <- dados[sample(1:nrow(dados), 10), -1]
+
+# Fazendo previsões com o modelo Lasso
+predict(finalizando_lasso$.workflow[[1]], 
+                           new_data = dados_novos)
+```
+
+
+```{r}
+# Fazendo previsões com o modelo Elastic Net
+predict(finalizando_elastic$.workflow[[1]], 
+                           new_data = dados_novos)
+```
+
+
+```{r}
+# Adicionando as previsões com o modelo Lasso ao conjunto de dados original
+augment(finalizando_lasso$.workflow[[1]], 
+                         new_data = dados_novos)
+```
+
+
+```{r}
+# Adicionando as previsões com o modelo Elastic Net ao conjunto de dados original
+augment(finalizando_elastic$.workflow[[1]], 
+                         new_data = dados_novos)
+```
+
+
+# Questão 3:
+
+Utilize o método *K - Nearest Neighbors* para prever o preço médio ( variável `MEDV`) de uma casa em diferentes áreas da cidade de Boston com base em várias características socioeconômicas e geográficas. Faça uma descritiva dos dados e realize a fase de preprocessamento dos dados.\
+
+**Você deverá:**\
+
+1. Explorar as variáveis, identificando as variáveis que possuem um comportamento assimétrico;\
+2. Pré-processar os dados e incluir o preprocessamento no pipeline. No preprocessamento, você
+ deverá:\
+ -  Realizar a transformação de Yeo-Johnson nas variáveis que possuem um comportamento assimétrico. No pacote *recipes*, utilize `step_YeoJohnson`;
+ - Incluir no preprocessamento a eliminação de variáveis altamente correlacionadas;\
+ - Incluir no preprocessamento a eliminação de covariáveis com zero variância.\
+3. Estimar o risco preditivo do modelo. Houve boas previsões? Explique!\
+4. Você deverá estratificar os dados em $80 \%$ para treino e $20 \%$ para teste, com base na variável *target*.\
+5. Utilize na validação cruzada *10-fold cross-validation*.\
+
+Acesse o [link](https://www.kaggle.com/datasets/fedesoriano/the-boston-houseprice-data) para baixar os dados.\
+
+`Resposta:`
+
+```{r}
+rm(list = ls())
+
+# Carregando pacotes 
+library(tidyverse)
+library(tidymodels)
+library(tibble)
+library(purrr)
+library(ggplot2)
+library(patchwork)
+library(workflowsets)
+library(yardstick)
+library(glmnet)
+library(kknn)
+library(visdat)
+library(janitor)
+library(parsnip)
+library(skimr)
+
+# Dando preferencias as funcoes do tidymodels 
+tidymodels::tidymodels_prefer()
+
+# Setando a semente 
+set.seed(0)
+
+# Carregando os dados 
+dados <- read.csv("~/AM/Prova 2/dados/boston.csv")
+
+# Limpando os nomes das variáveis 
+dados <-
+  dados %>% 
+  janitor::clean_names()
+
+
+# Visualizando as primeiras observações dos dados
+head(dados)
+```
+
+```{r}
+# Visualizando a estrutura dos dados
+glimpse(dados)
+```
+
+```{r}
+# Estatística descritiva dos dados
+skimr::skim(dados)
+```
+
+Observa-se que o conjunto de dados contém 506 observações e 14 variáveis. Além disso, observa-se que as variáveis `crim`, `zn`, `indus`, `nox`, `rm`, `age`, `dis`, `tax`, `ptratio`, `b`, `lstat` e `medv` são do tipo numérico, enquanto as variáveis `chas` e `rad` são do tipo inteiro categóricas.\
+
+```{r}
+# Visualizando as variáveis que possuem um comportamento assimétrico
+DescTools::Desc(dados)
+```
+
+Utilizando a função `Desc()` da library `DescTools` para analisar visualmente as variáveis que possuem um comportamento assimétrico, e avaliando a assimetria das variáveis com base do valor do argumento `skew` de cada variável, nota-se que as variáveis `indus` e `rm` possuem um comportamento simétrico, pois o valor do `skew`destas variáveis estão próximos de zero, enquanto as variáveis `crim`, `zn`, `nox`, `age`, `dis`, `tax`, `ptratio`, `b`, `lstat` e `medv` possuem um comportamento assimétrico.\
+
+```{r}
+# Olhando rapidamento os dados
+visdat::vis_dat(dados)
+```
+
+```{r}
+# Visualizando a correlação entre as variáveis 
+visdat::vis_cor(dados)
+```
+
+
+```{r}
+set.seed(0)
+
+# Data Splitting
+dados_split <- rsample::initial_split(dados, prop = 0.8, strata = "medv")
+treino <- rsample::training(dados_split)
+teste <- rsample::testing(dados_split)
+
+# Criando o conjunto de validação
+cv <- rsample::vfold_cv(treino, v = 10L)
+
+# Pré-processamento dos dados 
+receita <- 
+  recipes::recipe(medv ~ ., data = treino) %>%
+  # Eliminando as variáveis constantes (com zero variância)
+  recipes::step_zv(all_predictors()) %>%
+  # Transformando as variáveis assimétricas
+  recipes::step_YeoJohnson(all_numeric_predictors()) %>%
+  # Transformando as variáveis categóricas em dicotômicas (0 e 1) 
+  recipes::step_dummy(all_nominal_predictors()) %>%
+  # Eliminando as variáveis altamente correlacionadas
+  recipes::step_corr(all_numeric_predictors()) 
+```
+
+
+```{r}
+# Ajustando o modelo KNN 
+modelo_knn <- 
+  parsnip::nearest_neighbor(neighbors = tune("k")) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("kknn")
+```
+
+
+```{r}
+# Criando o Workflow 
+wf <- 
+  workflowsets::workflow_set(
+    preproc = list(formula = receita),
+    models = list(knn = modelo_knn), 
+    cross = TRUE
+  )
+```
+
+```{r}
+# Setando a métrica
+metrica <- yardstick::metric_set(rmse)
+
+# Tunagem dos hiperparâmetros
+tunagem <- 
+  wf %>% 
+  workflowsets::workflow_map(
+    seed = 0, 
+    verbose = TRUE,
+    resamples = cv,
+    grid = 50,
+    metrics = metrica
+  )
+```
+
+```{r}
+# Selecionando o melhor modelo
+melhor_knn <- 
+  tunagem %>% 
+  workflowsets::extract_workflow_set_result("formula_knn") %>% 
+  tune::select_best(metric = "rmse")
+
+# Finalizando o modelo
+finalizando_knn <-
+  tunagem %>% 
+  workflowsets::extract_workflow("formula_knn") %>% 
+  tune::finalize_workflow(melhor_knn) %>% 
+  tune::last_fit(split = dados_split)
+```
+
+```{r}
+# Visualizando as métricas do modelo KNN
+finalizando_knn %>% workflowsets::collect_metrics()
+```
+
+Em relação ao risco preditivo do modelo KNN, observa-se que o Erro Quadrático Médio (EQM) foi de $4.74$ e o $R^{2}$ de $0.730$, o EQM foi relativamente bom, mas como o $R^{2}$ não é muito alto, é provável que o modelo não faça boas previsões para alguns preços médios das casas de diferentes áreas da cidade de Boston.\
+
+
+```{r}
+# Visualizando predições do modelo KNN
+finalizando_knn %>% workflowsets::collect_predictions()
+```
+
+Analisando algumas predições acima do modelo KNN, observa-se que o modelo fez boas previsões para os preços médios (`medv`) em sua grande parte, porém para alguns preços médios o modelo não fez boas previsões.\
+
+```{r}
+# Extraindo o modelo KNN
+modelo_final_knn <- 
+  finalizando_knn %>% 
+  extract_fit_parsnip()
+```
+
+
+```{r}
+# Fazendo previsões 
+dados_novos <- dados[sample(1:nrow(dados), 10), ]
+
+# Fazendo previsões com o modelo KNN
+predict(finalizando_knn$.workflow[[1]], 
+                           new_data = dados_novos) 
+```
+
+
+```{r}
+# Adicionando as previsões com o modelo KNN ao conjunto de dados original
+previsoes_knn <- augment(finalizando_knn$.workflow[[1]], 
+                         new_data = dados_novos) %>% print()
+```
+
+```{r}
+# Adicionando as previsões com o modelo KNN ao conjunto de dados original
+previsoes_knn[, c("medv", ".pred")] %>% print()
+```
+
+Observa-se que o modelo fez boas previsões para os preços médios (`medv`) em sua grande parte, porém para alguns preços médios o modelo não fez boas previsões.\
+
+
+# Questão 4:
+
+Com base na questão 1, escolha entre as 5 *features* preditoras que foram úteis para gerar $y$, duas para introduzir $10 \%$ de *missing values* em cada uma dessas duas variáveis. A introdução das observações faltantes deverá ser aleatória. Após, isso, realize a comparação do método *Elastic-Net* com o método *K - Nearest Neighbors* - KNN. Compare o risco preditivo de cada um do modelos. Na fase de pré-processamento, você deverá utilizar também o método KNN, considerando $k =5$ dados faltantes. Qual o modelo que forneceu um melhor risco preditivo? Explique!\
+ 
+`Resposta:`
+
+```{r}
+rm(list = ls())
+
+# Carregando pacotes 
+library(tidyverse)
+library(tidymodels)
+library(tibble)
+library(purrr)
+library(ggplot2)
+library(patchwork)
+library(workflowsets)
+library(yardstick)
+library(glmnet)
+library(kknn)
+library(visdat)
+
+# Dando preferencias as funcoes do tidymodels 
+tidymodels::tidymodels_prefer()
+
+# Setando a semente 
+set.seed(0)
+
+# Função para gerar os dados 
+gerando_dados <- function(n = 5000L){
+  regressao <- function(i){
+    x <- rnorm(n = 5000L, 0, 1)
+    target <- 7*x[1L] - 5*x[2L] + 2*x[3L] + 4*x[4L] + 9*x[5L] + rnorm(1L, 0, 0.5)
+    tibble(
+      y = target,
+      x1 = x[1L],
+      x2 = x[2L],
+      x3 = x[3L],
+      x4 = x[4L],
+      x5 = x[5L]
+    )
+  }
+  dados <- purrr::map(.x = 1L:n, .f = regressao) %>% 
+    purrr::list_rbind()
+  
+  parte_esparsa <- matrix(0, n, 15)
+  
+  dados <- cbind(dados, parte_esparsa)
+  colnames(dados) <- c("y", paste0("x", 1L:20L))
+  tibble::as_tibble(dados)
+}
+
+dados <- gerando_dados()
+```
+
+
+```{r}
+set.seed(0) 
+
+# Introduzindo 10% missing values nas variáveis x3 e x5 de forma aleatória
+id_na <- sample(1:nrow(dados), 0.1*nrow(dados))
+dados[id_na, "x3"] <- NA
+dados[id_na, "x5"] <- NA
+```
+
+```{r}
+# Olhando rapidamento os dados 
+visdat::vis_dat(dados)
+```
+
+
+```{r}
+# Visualizando a correlação entre as variáveis
+visdat::vis_cor(dados[-c(7:21)])
+```
+
+```{r}
+set.seed(0)
+
+# Data Splitting
+dados_split <- rsample::initial_split(dados, prop = 0.8, strata = "y")
+treino <- rsample::training(dados_split)
+teste <- rsample::testing(dados_split)
+
+# Criando o conjunto de validação
+cv <- rsample::vfold_cv(treino, v = 10L)
+
+# Pré-processamento dos dados 
+receita <- 
+  recipe(y ~ ., data = treino) %>%
+  # Eliminando as variáveis constantes (com zero variância)
+  recipes::step_zv(all_predictors()) %>%
+  # Normalizando as variáveis numéricas
+  recipes::step_normalize(all_numeric_predictors()) %>%
+  #considerando k = 5 para inputar os dados faltantes
+  recipes::step_impute_knn(all_predictors(), neighbors = 5)  
+```
+
+
+```{r}
+# Setando o modelo (set engine) 
+modelo_elastic <- 
+  parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("glmnet")
+
+modelo_knn <- 
+  parsnip::nearest_neighbor(neighbors = tune("k")) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("kknn")
+```
+
+
+```{r}
+# Criando workflows 
+all_wf <- 
+  workflowsets::workflow_set(
+    preproc = list(formula = receita),
+    models = list(elastic = modelo_elastic, knn = modelo_knn), 
+    cross = TRUE
+  )
+```
+
+
+```{r}
+# Setando a métrica 
+metrica <- yardstick::metric_set(rmse)
+
+# Tunagem dos hiperparâmetros 
+tunagem <- 
+  all_wf %>% 
+  workflowsets::workflow_map(
+    seed = 0, 
+    verbose = TRUE,
+    resamples = cv,
+    grid = 50,
+    metrics = metrica
+  )
+```
+
+
+
+```{r}
+# Rank dos melhores modelos 
+modelos_rank <- tunagem %>% workflowsets::rank_results() %>% print()
+```
+
+
+```{r}
+# Selecionando os melhores modelos 
+melhor_elastic <- 
+  tunagem %>% 
+  workflowsets::extract_workflow_set_result("formula_elastic") %>% 
+  tune::select_best(metric = "rmse")
+
+melhor_knn <- 
+  tunagem %>% 
+  workflowsets::extract_workflow_set_result("formula_knn") %>% 
+  tune::select_best(metric = "rmse")
+
+# Finalizando os modelos 
+finalizando_elastic <- 
+  tunagem %>% 
+  workflowsets::extract_workflow("formula_elastic") %>% 
+  tune::finalize_workflow(melhor_elastic) %>% 
+  tune::last_fit(split = dados_split)
+
+finalizando_knn <-
+  tunagem %>% 
+  workflowsets::extract_workflow("formula_knn") %>% 
+  tune::finalize_workflow(melhor_knn) %>% 
+  tune::last_fit(split = dados_split)
+```
+
+
+```{r}
+# Visualizando as métricas do modelo Elastic Net
+finalizando_elastic %>% workflowsets::collect_metrics()
+```
+
+
+```{r}
+# Visualizando as métricas do modelo KNN
+finalizando_knn %>% workflowsets::collect_metrics()
+```
+
+Avaliando o risco preditivo dos modelos, nota-se que o modelo Elastic Net apresentou um Erro Quadrático Médio (EQM) de $3.41$, enquanto o modelo KNN apresentou um EQM de $4.15$. Além disso, observa-se que o modelo Elastic Net apresentou um $R^{2}$ de $0.930$, enquanto para o modelo KNN o $R^{2}$ foi de $0.906$. Como o EQM do modelo Elastic Net foi menor que o do modelo KNN, além do $R^{2}$ do modelo Elastic Net ter sido maior que o do KNN, logo o modelo Elastic Net nos forneceu um melhor risco preditivo que o KNN.\
+
+
+```{r}
+# Visualizando predições do modelo Elastic Net
+finalizando_elastic %>% workflowsets::collect_predictions()
+```
+
+
+```{r}
+# Visualizando predições do modelo KNN
+finalizando_knn %>% workflowsets::collect_predictions()
+```
+
+```{r}
+# Extraindo o modelo Elastic Net
+modelo_final_elastic <- 
+  finalizando_elastic %>% 
+  extract_fit_parsnip()
+
+# Extraindo o modelo KNN
+modelo_final_knn <- 
+  finalizando_knn %>% 
+  extract_fit_parsnip()
+```
+
+
+# Questão 5:
+
+ Considere a base de dados referente à despesas médicas, cujo o objetivo é predizer a variável `charges`. Clique [aqui](https://www.kaggle.com/datasets/mirichoi0218/insurance) para efetuar o download dos dados. Considere os algoritmos, lasso, ridge, *elastic net* e KNN e compare o risco preditivo de cada um dos modelos.\
+ 
+Você deverá utilizar boas práticas na comparação, explorar os dados e avaliar de forma adequada o risco preditivo de cada um dos modelos considerados. Perceba que existem variáveis categóricas na base de dados. Dessa forma, você deverá introduzir no *pipeline* o pré-processamento. Discuta o resultado.\
+ 
+`Resposta:`
+
+```{r}
+rm(list = ls())
+
+# Carregando pacotes 
+library(tidyverse)
+library(tidymodels)
+library(tibble)
+library(purrr)
+library(ggplot2)
+library(patchwork)
+library(workflowsets)
+library(yardstick)
+library(glmnet)
+library(kknn)
+library(visdat)
+
+# Dando preferencias as funcoes do tidymodels 
+tidymodels::tidymodels_prefer()
+
+# Setando a semente 
+set.seed(0)
+
+# Carregando os dados 
+dados <- read.csv("~/AM/Prova 2/dados/insurance.csv")
+
+# Visualizando as primeiras observações dos dados
+head(dados)
+```
+
+```{r}
+# Visualizando a estrutura dos dados
+glimpse(dados)
+```
+
+```{r}
+# Olhando rapidamento os dados 
+visdat::vis_dat(dados)
+```
+
+```{r}
+# Visualizando a correlação entre as variáveis 
+visdat::vis_cor(dados[-c(2,5,6)])
+```
+
+
+```{r}
+set.seed(0)
+
+# Data Splitting
+dados_split <- rsample::initial_split(dados, prop = 0.8, strata = "charges")
+treino <- rsample::training(dados_split)
+teste <- rsample::testing(dados_split)
+
+# Criando o conjunto de validação
+cv <- rsample::vfold_cv(treino, v = 5L)
+
+# Pré-processamento dos dados 
+receita <- 
+  recipe(charges ~ ., data = treino) %>%
+  # Eliminando as variáveis constantes (com zero variância)
+  recipes::step_zv(all_predictors()) %>%
+  # Normalizando as variáveis numéricas
+  recipes::step_normalize(all_numeric_predictors()) %>%
+  # Transformando as variáveis categóricas em dicotômicas (0 e 1) 
+  step_dummy(all_nominal_predictors()) %>%
+  # Eliminando as variáveis correlacionadas
+  recipes::step_corr(all_numeric_predictors()) 
+```
+
+
+```{r}
+# Setando o modelo (set engine) 
+modelo_ridge <- 
+  parsnip::linear_reg(penalty = tune::tune(), mixture = 0) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("glmnet")
+
+modelo_lasso <- 
+  parsnip::linear_reg(penalty = tune::tune(), mixture = 1) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("glmnet")
+
+modelo_elastic <- 
+  parsnip::linear_reg(penalty = tune::tune(), mixture = tune::tune()) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("glmnet")
+
+modelo_knn <- 
+  parsnip::nearest_neighbor(neighbors = tune("k")) %>% 
+  parsnip::set_mode("regression") %>% 
+  parsnip::set_engine("kknn")
+```
+
+
+```{r}
+# Criando workflows 
+all_wf <- 
+  workflowsets::workflow_set(
+    preproc = list(formula = receita),
+    models = list(ridge = modelo_ridge, lasso = modelo_lasso, 
+                  elastic = modelo_elastic, knn = modelo_knn), 
+    cross = TRUE
+  )
+```
+
+
+```{r}
+# Setando a métrica 
+metrica <- yardstick::metric_set(rmse)
+
+# Tunagem dos hiperparâmetros 
+tunagem <- 
+  all_wf %>% 
+  workflowsets::workflow_map(
+    seed = 0, 
+    verbose = TRUE,
+    resamples = cv,
+    grid = 50,
+    metrics = metrica
+  )
+```
+
+
+
+```{r}
+# Rank dos melhores modelos 
+modelos_rank <- tunagem %>% workflowsets::rank_results() %>% print()
+```
+
+
+```{r}
+# Selecionando os melhores modelos 
+melhor_ridge <- 
+  tunagem %>% 
+  workflowsets::extract_workflow_set_result("formula_ridge") %>% 
+  tune::select_best(metric = "rmse")
+
+melhor_lasso <- 
+  tunagem %>% 
+  workflowsets::extract_workflow_set_result("formula_lasso") %>% 
+  tune::select_best(metric ="rmse")
+
+melhor_elastic <- 
+  tunagem %>% 
+  workflowsets::extract_workflow_set_result("formula_elastic") %>% 
+  tune::select_best(metric = "rmse")
+
+melhor_knn <- 
+  tunagem %>% 
+  workflowsets::extract_workflow_set_result("formula_knn") %>% 
+  tune::select_best(metric = "rmse")
+
+# Finalizando os modelos 
+finalizando_ridge <- 
+  tunagem %>% 
+  workflowsets::extract_workflow("formula_ridge") %>% 
+  tune::finalize_workflow(melhor_ridge) %>% 
+  tune::last_fit(split = dados_split)
+
+finalizando_lasso <- 
+  tunagem %>% 
+  workflowsets::extract_workflow("formula_lasso") %>% 
+  tune::finalize_workflow(melhor_lasso) %>% 
+  tune::last_fit(split = dados_split)
+
+finalizando_elastic <- 
+  tunagem %>% 
+  workflowsets::extract_workflow("formula_elastic") %>% 
+  tune::finalize_workflow(melhor_elastic) %>% 
+  tune::last_fit(split = dados_split)
+
+finalizando_knn <-
+  tunagem %>% 
+  workflowsets::extract_workflow("formula_knn") %>% 
+  tune::finalize_workflow(melhor_knn) %>% 
+  tune::last_fit(split = dados_split)
+```
+
+```{r}
+# Visualizando as métricas do modelo Ridge
+finalizando_ridge %>% workflowsets::collect_metrics()
+```
+
+```{r}
+# Visualizando as métricas do modelo Lasso
+finalizando_lasso %>% workflowsets::collect_metrics()
+```
+
+```{r}
+# Visualizando as métricas do modelo Elastic Net
+finalizando_elastic %>% workflowsets::collect_metrics()
+```
+
+
+```{r}
+# Visualizando as métricas do modelo KNN
+finalizando_knn %>% workflowsets::collect_metrics()
+```
+
+Comparando o risco preditivo dos modelos, observa-se que o modelo KNN foi o que apresentou o melhor risco preditivo com um menor Erro Quadrático Médio (EQM) de $5550$ e um maior $R^{2}$ de $0.811$. O modelo Lasso obteve um EQM de $6442$, enquanto o modelo Elastic Net apresentou um EQM de $6446$, em que ambos tiveram um $R^{2}$ de $0.743$. Por fim, o modelo que mostrou um pior desempenho foi o Ridge, com um maior EQM de $6530$ e $R^{2}$ de $0.744$.\
+
+```{r}
+# Visualizando predições do modelo Ridge
+finalizando_ridge %>% workflowsets::collect_predictions()
+```
+
+```{r}
+# Visualizando predições do modelo Lasso
+finalizando_lasso %>% workflowsets::collect_predictions()
+```
+
+```{r}
+# Visualizando predições do modelo Elastic Net
+finalizando_elastic %>% workflowsets::collect_predictions()
+```
+
+
+```{r}
+# Visualizando predições do modelo KNN
+finalizando_knn %>% workflowsets::collect_predictions()
+```
+
+```{r}
+# Extraindo o modelo Ridge
+modelo_final_ridge <- 
+  finalizando_ridge %>% 
+  extract_fit_parsnip()
+
+# Extraindo o modelo Lasso
+modelo_final_lasso <- 
+  finalizando_lasso %>% 
+  extract_fit_parsnip()
+
+# Extraindo o modelo Elastic Net
+modelo_final_elastic <- 
+  finalizando_elastic %>% 
+  extract_fit_parsnip()
+
+# Extraindo o modelo KNN
+modelo_final_knn <- 
+  finalizando_knn %>% 
+  extract_fit_parsnip()
+```
+
+```{r}
+# Fazendo previsões 
+dados_novos <- dados[sample(1:nrow(dados), 10), -7]
+
+# Fazendo previsões com o modelo Ridge
+predict(finalizando_ridge$.workflow[[1]], 
+                           new_data = dados_novos)
+```
+
+
+```{r}
+# Fazendo previsões com o modelo Lasso
+predict(finalizando_lasso$.workflow[[1]], 
+                           new_data = dados_novos)
+```
+
+
+```{r}
+# Fazendo previsões com o modelo Elastic Net
+predict(finalizando_elastic$.workflow[[1]], 
+                           new_data = dados_novos)
+```
+
+```{r}
+# Fazendo previsões com o modelo KNN
+predict(finalizando_knn$.workflow[[1]], 
+                           new_data = dados_novos)
+```
+
+```{r}
+# Adicionando as previsões com o modelo Ridge ao conjunto de dados original
+augment(finalizando_ridge$.workflow[[1]], 
+                         new_data = dados_novos)
+```
+
+
+```{r}
+# Adicionando as previsões com o modelo Lasso ao conjunto de dados original
+augment(finalizando_lasso$.workflow[[1]], 
+                         new_data = dados_novos)
+```
+
+
+```{r}
+# Adicionando as previsões com o modelo Elastic Net ao conjunto de dados original
+augment(finalizando_elastic$.workflow[[1]], 
+                         new_data = dados_novos)
+```
+
+
+```{r}
+# Adicionando as previsões com o modelo KNN ao conjunto de dados original
+augment(finalizando_knn$.workflow[[1]], 
+                         new_data = dados_novos)
+```
